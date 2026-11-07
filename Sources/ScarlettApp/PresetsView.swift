@@ -158,7 +158,7 @@ struct PresetsView: View {
                 savePreset()
             } label: {
                 Pill(icon: "bookmark.fill", title: "Save",
-                     fill: Theme.muteActive, foreground: .white, size: .row)
+                     fill: Theme.accent, foreground: .white, size: .row)
             }
             .buttonStyle(.pill)
             .disabled(ScarlettPreset.normalizedName(newPresetName).isEmpty)
@@ -295,7 +295,7 @@ struct PresetsView: View {
                         state.userUpdatePreset(preset)
                     } label: {
                         Pill(icon: "square.and.arrow.down", title: "Save modified",
-                             fill: Theme.muteActive, foreground: .white, size: .row)
+                             fill: Theme.accent, foreground: .white, size: .row)
                     }
                     .buttonStyle(.pill)
                     .fixedSize()

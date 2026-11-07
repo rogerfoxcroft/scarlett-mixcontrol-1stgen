@@ -374,7 +374,7 @@ struct KnobToggle: View {
 
     var body: some View {
         let on = state.monitorKnobEnabled
-        StripButton(letter: "HW", active: on, activeColor: Theme.muteActive) {
+        StripButton(letter: "HW", active: on, activeColor: Theme.accent) {
             state.userSetMonitorKnobEnabled(!on)
         }
         .help(on
@@ -387,26 +387,39 @@ struct KnobToggle: View {
 // MARK: - HWIndicator
 
 /// Read-only indicator lamp mirroring a hardware button (18i20 front-panel
-/// DIM/MUTE).  Not clickable — the hardware owns the state.
+/// DIM/MUTE).  Drawn as a round LED that glows when lit; not clickable —
+/// the hardware owns the state.
 struct HWIndicator: View {
     let label: String
     let active: Bool
     /// Lamp color when lit — matches the device's own LED color.
     var activeColor: Color = Theme.soloActive
 
+    private let size: CGFloat = 16
+
     var body: some View {
-        Text(label)
-            .font(.system(size: 8, weight: .semibold))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .background(active ? activeColor : Theme.panelRaised.opacity(0.5))
+        Text(String(label.prefix(1)))
+            .font(.system(size: 8, weight: .bold))
             .foregroundStyle(active ? .white : Theme.textSecondary.opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-            .overlay(
-                RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(Theme.textSecondary.opacity(0.25), lineWidth: 0.5)
+            .frame(width: size, height: size)
+            .background(
+                Circle().fill(active
+                    ? AnyShapeStyle(RadialGradient(
+                        colors: [activeColor.opacity(0.75), activeColor],
+                        center: .center, startRadius: 0, endRadius: size / 2))
+                    : AnyShapeStyle(Color(white: 0.11)))
             )
+            .overlay(
+                Circle().strokeBorder(active ? activeColor.opacity(0.9)
+                                             : Theme.textSecondary.opacity(0.3),
+                                      lineWidth: 0.75)
+            )
+            // Glow: a tight halo plus a wider, softer bloom.
+            .shadow(color: active ? activeColor.opacity(0.9) : .clear, radius: 2)
+            .shadow(color: active ? activeColor.opacity(0.6) : .clear, radius: 6)
+            .padding(.horizontal, 1)
             .help("\(label) is controlled by the front-panel button on this device — shown here read-only.")
+            .accessibilityLabel("Hardware \(label) \(active ? "on" : "off")")
     }
 }
 
