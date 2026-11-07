@@ -168,10 +168,15 @@ struct OutputStrip: View {
     private var hasGainStage: Bool { state.profile.hasGainStage(wValue: leftWValue) }
 
     /// True for the Monitor pair on a device with a hardware monitor
-    /// section (18i20): its level is owned by the front-panel knob, so the
+    /// section (18i20).
+    private var hasHardwareKnob: Bool {
+        showDim && state.profile.hasHardwareMonitorControls
+    }
+
+    /// While the front-panel knob is connected it owns the level, so the
     /// fader is a read-only mirror of the pot.
     private var mirrorsHardwarePot: Bool {
-        showDim && state.profile.hasHardwareMonitorControls
+        hasHardwareKnob && state.monitorKnobEnabled
     }
 
     /// The dB value the fader should show: the hardware pot when mirroring,
@@ -240,10 +245,12 @@ struct OutputStrip: View {
             if mirrorsHardwarePot {
                 // Level is owned by the front-panel knob; the fader just
                 // tracks it. Not draggable — turning the knob moves it.
+                // Dimmed so it reads as disabled while HW is on.
                 VerticalFader(db: Binding(get: { displayedDb }, set: { _ in }),
                               axis: .attenuation)
                     .allowsHitTesting(false)
-                    .help("Monitor level is set by the front-panel knob on this device — the fader mirrors it.")
+                    .opacity(0.4)
+                    .help("The front-panel knob sets the Monitor level (HW is on) — the fader follows it. Turn HW off to use the fader.")
             } else if hasGainStage {
                 VerticalFader(db: atten, axis: .attenuation)
                     .contextMenu {
@@ -288,19 +295,14 @@ struct OutputStrip: View {
     @ViewBuilder
     private var controls: some View {
         if hasGainStage {
-            let leftMuted = state.outputMuted(leftWValue)
-            let rightMuted = rightOutput.map { state.outputMuted($0.wValue) } ?? false
+            // One mute for the pair: lit when every side is muted; a click
+            // then unmutes them all, otherwise mutes them all.
+            let members = outputs.map(\.wValue)
+            let muted = members.allSatisfy { state.outputMuted($0) }
             HStack(spacing: 3) {
                 Spacer(minLength: 0)
-                StripButton(letter: rightOutput == nil ? "M" : "ML", active: leftMuted,
-                            activeColor: Theme.muteActive) {
-                    state.userSetOutputMute(wValue: leftWValue, muted: !leftMuted)
-                }
-                if let right = rightOutput {
-                    StripButton(letter: "MR", active: rightMuted,
-                                activeColor: Theme.muteActive) {
-                        state.userSetOutputMute(wValue: right.wValue, muted: !rightMuted)
-                    }
+                StripButton(letter: "M", active: muted, activeColor: Theme.muteActive) {
+                    for wv in members { state.userSetOutputMute(wValue: wv, muted: !muted) }
                 }
                 if showDim {
                     if state.profile.hasHardwareMonitorControls {
@@ -311,6 +313,7 @@ struct OutputStrip: View {
                         // The 18i20's MUTE button lights red — match it.
                         HWIndicator(label: "Mute", active: state.hwMonitor?.mute ?? false,
                                     activeColor: Theme.meterHigh)
+                        KnobToggle(state: state)
                     } else {
                         StripButton(letter: "Dim", active: state.dimEnabled,
                                     activeColor: Theme.soloActive) {
@@ -359,6 +362,26 @@ struct OutputStrip: View {
         }
     }
 
+}
+
+// MARK: - KnobToggle
+
+/// "HW" button: connects / disconnects the 18i20's front-panel volume
+/// knob from the Monitor pair (MixControl's hardware control switch).
+/// Lit = the knob sets the level; off = the Monitor fader does.
+struct KnobToggle: View {
+    @Bindable var state: MixerState
+
+    var body: some View {
+        let on = state.monitorKnobEnabled
+        StripButton(letter: "HW", active: on, activeColor: Theme.muteActive) {
+            state.userSetMonitorKnobEnabled(!on)
+        }
+        .help(on
+              ? "The front-panel knob sets the Monitor level. Click to disconnect it and set the level with this fader instead. Dim and Mute keep working."
+              : "The front-panel knob is disconnected; this fader sets the Monitor level. Click to give control back to the knob.")
+        .accessibilityLabel(on ? "Disconnect front-panel knob" : "Connect front-panel knob")
+    }
 }
 
 // MARK: - HWIndicator

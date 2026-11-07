@@ -209,6 +209,7 @@ private struct MenuBarOutputRow: View {
     /// fader only mirrors it (as in the mixer's Monitor strip).
     private var mirrorsHardwarePot: Bool {
         leftWValue == state.monitorPairLeftWValue && state.profile.hasHardwareMonitorControls
+            && state.monitorKnobEnabled
     }
 
     private var displayedDb: Double {
@@ -262,6 +263,7 @@ private struct MenuBarOutputRow: View {
                 if mirrorsHardwarePot {
                     HorizontalFader(db: .constant(displayedDb), label: label)
                         .allowsHitTesting(false)
+                        .opacity(0.4)
                 } else {
                     HorizontalFader(db: Binding(
                         get: { state.pairAtten(leftWValue: leftWValue) },

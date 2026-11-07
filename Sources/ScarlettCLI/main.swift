@@ -160,6 +160,12 @@ usage: scarlett-cli <command> [args]
       once or continuously. Shows raw bytes — press the front-panel
       buttons while watching to see which byte tracks which control.
 
+  monitor-knob [read|off|on|mask <hex>]
+      18i20: choose which analog outputs follow the front-panel volume
+      knob. "off" disconnects the knob (DIM/MUTE keep working), "on"
+      gives it Out 1+2 back, "mask" sets any bitmask (bit 0 = Out 1).
+      "read" (default) probes the current mask.
+
   probe-output <wValue|all>
       SET→GET roundtrip on a physical output's attenuation + mute stage
       (stage index = route wValue + 1). Restores prior values. Use this to
@@ -362,6 +368,26 @@ func main() throws {
         } else {
             try readAndPrint()
         }
+
+    case "monitor-knob":
+        let action = args.first?.lowercased() ?? "read"
+        let mask: UInt32?
+        switch action {
+        case "read": mask = nil
+        case "off":  mask = 0
+        case "on":   mask = 0b11
+        case "mask":
+            let hex = try need(args, 1, "mask").lowercased().replacingOccurrences(of: "0x", with: "")
+            guard let v = UInt32(hex, radix: 16) else { throw CLIError.usage("mask: expected hex, got '\(hex)'") }
+            mask = v
+        default: throw CLIError.usage("monitor-knob: expected read|off|on|mask <hex>")
+        }
+        if let mask {
+            try dev.setMonitorKnobOutputs(mask: mask)
+            print("✓ knob output mask ← 0x\(String(mask, radix: 16))")
+        }
+        let now = try dev.getMonitorKnobOutputs()
+        print("read-back mask: 0x\(String(now, radix: 16))  (bit 0 = Out 1)")
 
     case "probe-output":
         // Verify that a physical output's post-routing gain stage responds:
