@@ -133,6 +133,12 @@ final class MixerState {
     /// stage are eligible — digital outs have no volume to set.
     var menuBarPairLabels: Set<String> = []
 
+    /// Routing page: the user's explicit Stereo tick per output pair (by
+    /// `pairLabel`).  A pair with no entry is shown as stereo when its two
+    /// routes form a source pair (or both are off) — so a pair carrying,
+    /// say, DAW 3 + Mix M2 isn't misrepresented.  Persisted per device.
+    var outputStereoChoices: [String: Bool] = [:]
+
     // Input switches — defaults are conservative (line / lo). Not pushed on launch.
     var impedance1: Impedance = .line
     var impedance2: Impedance = .line
@@ -461,6 +467,7 @@ final class MixerState {
     private static let visibleOutputsKeyPrefix  = "scarlett.visibleOutputs.v1"
     private static let menuBarOutputsKeyPrefix  = "scarlett.menuBarOutputs.v1"
     private static let loadedPresetKeyPrefix    = "scarlett.loadedPreset.v1"
+    private static let outputStereoKeyPrefix    = "scarlett.outputStereo.v1"
 
     private func routesKey(for profile: DeviceProfile) -> String {
         "\(Self.routesKeyPrefix).\(profile.productID)"
@@ -482,6 +489,9 @@ final class MixerState {
     }
     private func visibleOutputsKey(for profile: DeviceProfile) -> String {
         "\(Self.visibleOutputsKeyPrefix).\(profile.productID)"
+    }
+    private func outputStereoKey(for profile: DeviceProfile) -> String {
+        "\(Self.outputStereoKeyPrefix).\(profile.productID)"
     }
     private func menuBarOutputsKey(for profile: DeviceProfile) -> String {
         "\(Self.menuBarOutputsKeyPrefix).\(profile.productID)"
@@ -561,6 +571,71 @@ final class MixerState {
         writeAsync { try? dev.setRouteSource(wValue: wValue, from: source) }
     }
 
+    // MARK: - Stereo output routing
+
+    /// Source pairs offered to an output pair in stereo mode: Off, then
+    /// every odd/even pair of one family the router offers (Mix M1/M2,
+    /// DAW 1/2, Analog 3/4, …).
+    var stereoRouteOptions: [RoutePair] {
+        let opts = routerPickerOptions.filter { $0 != .off }
+        var out: [RoutePair] = [.off]
+        for a in opts {
+            guard let na = RoutePair.split(a), na.number % 2 == 1,
+                  let b = opts.first(where: {
+                      guard let nb = RoutePair.split($0) else { return false }
+                      return nb.head == na.head && nb.number == na.number + 1
+                  })
+            else { continue }
+            out.append(RoutePair(left: a, right: b))
+        }
+        return out
+    }
+
+    /// The (left, right) output wValues of an output pair.
+    func outputPairWValues(_ label: String) -> (left: UInt16, right: UInt16)? {
+        let outs = profile.physicalOutputs.filter { $0.pairLabel == label }
+        guard let l = outs.first(where: { $0.isLeft }),
+              let r = outs.first(where: { !$0.isLeft }) else { return nil }
+        return (l.wValue, r.wValue)
+    }
+
+    /// What an output pair is currently routed from, as a pair.
+    func routePair(forOutputPair label: String) -> RoutePair {
+        guard let w = outputPairWValues(label) else { return .off }
+        return RoutePair(left: routes[w.left] ?? .off, right: routes[w.right] ?? .off)
+    }
+
+    /// Whether the routing page shows this output pair as stereo.
+    func isOutputPairStereo(_ label: String) -> Bool {
+        if let choice = outputStereoChoices[label] { return choice }
+        return stereoRouteOptions.contains(routePair(forOutputPair: label))
+    }
+
+    /// Tick / untick Stereo for an output pair.  Ticking it on a pair whose
+    /// routes aren't a source pair snaps them to the pair that contains the
+    /// first routed source (DAW 3 + Mix M2 → DAW 3/4).  Unticking keeps
+    /// the routes as they are.
+    func userSetOutputPairStereo(_ label: String, _ stereo: Bool) {
+        if stereo {
+            let current = routePair(forOutputPair: label)
+            let options = stereoRouteOptions
+            if !options.contains(current),
+               let seed = [current.left, current.right].first(where: { $0 != .off }),
+               let target = options.first(where: { $0 != .off && ($0.left == seed || $0.right == seed) }) {
+                userSetStereoRoute(outputPair: label, target)
+            }
+        }
+        outputStereoChoices[label] = stereo
+        UserDefaults.standard.set(outputStereoChoices, forKey: outputStereoKey(for: profile))
+    }
+
+    /// Route a source pair to an output pair (left → left, right → right).
+    func userSetStereoRoute(outputPair label: String, _ pair: RoutePair) {
+        guard let w = outputPairWValues(label) else { return }
+        userSetRoute(wValue: w.left, to: pair.left)
+        userSetRoute(wValue: w.right, to: pair.right)
+    }
+
     private struct PersistedMatrix: Codable {
         var levels: [[Double]]      // 18 × 3, per-channel-per-pair
         var pans: [[Double]]        // 18 × 3
@@ -614,6 +689,13 @@ final class MixerState {
             let valid = Set(profile.physicalOutputs.map(\.pairLabel))
             let filtered = Set(saved.map { renamed[$0] ?? $0 }).intersection(valid)
             if !filtered.isEmpty { visiblePairLabels = filtered }
+        }
+
+        // Routing page Stereo ticks, minus labels this profile doesn't have.
+        outputStereoChoices = [:]
+        if let saved = defaults.dictionary(forKey: outputStereoKey(for: profile)) as? [String: Bool] {
+            let valid = Set(profile.physicalOutputs.map(\.pairLabel))
+            outputStereoChoices = saved.filter { valid.contains($0.key) }
         }
 
         // Menu bar sliders — unlike the pinned strips, hiding every pair is
@@ -1775,6 +1857,10 @@ final class MixerState {
     /// Hardware switches (impedance / hi-lo), clock, sample rate and master
     /// output attenuation are left alone.
     func userResetRoutingAndMatrix() {
+        // Default routes are source pairs, so let every output pair fall
+        // back to showing as stereo.
+        outputStereoChoices = [:]
+        UserDefaults.standard.removeObject(forKey: outputStereoKey(for: profile))
         let p = profile
         ensureRouteSlots(for: p)
 
@@ -2040,5 +2126,36 @@ struct StereoSource: Hashable, Identifiable, Sendable {
         guard let space = name.lastIndex(of: " "),
               let n = Int(name[name.index(after: space)...]) else { return nil }
         return (String(name[..<space]), n)
+    }
+}
+
+/// A pair of router sources feeding an output pair's left and right outputs.
+struct RoutePair: Hashable, Identifiable, Sendable {
+    let left: MixBus
+    let right: MixBus
+
+    static let off = RoutePair(left: .off, right: .off)
+
+    var id: UInt16 { UInt16(left.rawValue) << 8 | UInt16(right.rawValue) }
+
+    /// "Mix M1/M2", "DAW 1/2", "Off", or both names in full for anything
+    /// else (e.g. "DAW 3/Mix M2").
+    var displayName: String {
+        if self == .off { return "Off" }
+        if let l = Self.split(left), let r = Self.split(right), l.head == r.head {
+            // "DAW 1/2" when the number follows a space; "Mix M1/M2" when
+            // it follows a letter, so the second half keeps its "M".
+            let tag = l.head.last == " " ? "" : String(l.head.split(separator: " ").last ?? "")
+            return "\(l.head)\(l.number)/\(tag)\(r.number)"
+        }
+        return "\(left.displayName)/\(right.displayName)"
+    }
+
+    /// "Mix M3" → ("Mix M", 3); "DAW 12" → ("DAW ", 12).
+    static func split(_ bus: MixBus) -> (head: String, number: Int)? {
+        let name = bus.displayName
+        let digits = name.reversed().prefix(while: \.isNumber)
+        guard !digits.isEmpty, let n = Int(String(digits.reversed())) else { return nil }
+        return (String(name.dropLast(digits.count)), n)
     }
 }
