@@ -137,7 +137,10 @@ struct MatrixMixerView: View {
         HStack(alignment: .top, spacing: 6) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(visibleChannels, id: \.self) { ch in
+                    // A linked pair shows as one stereo strip, drawn by
+                    // its left (even) channel — skip the right one.
+                    ForEach(visibleChannels.filter { !($0 % 2 == 1 && state.isLinked($0)) },
+                            id: \.self) { ch in
                         ChannelStrip(channel: ch, state: state)
                     }
                 }

@@ -4,6 +4,11 @@ import ScarlettCore
 /// A vertical mixer strip for one matrix channel in the currently selected bus.
 /// Layout mirrors Focusrite Control 2: name + source + colored underline at top,
 /// fader with dB scale and meter in the middle, M/S buttons at the bottom.
+///
+/// When `channel` is the left (even) half of a linked pair, the strip drives
+/// both channels as one stereo strip: paired source picker, L/R meter, a
+/// stereo pan, and shared fader / mute / solo.  The mixer hides the right
+/// channel's own strip while linked.
 @MainActor
 struct ChannelStrip: View {
     let channel: Int
@@ -36,12 +41,11 @@ struct ChannelStrip: View {
         .padding(.horizontal, 6)
         .background(Theme.panel)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            // Subtle border to make linked pairs visually obvious.
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(state.isLinked(channel) ? Theme.muteActive.opacity(0.45) : .clear, lineWidth: 1)
-        )
     }
+
+    /// True when this strip stands for a linked stereo pair.
+    private var isStereo: Bool { state.isLinked(channel) && channel % 2 == 0 }
+    private var rightChannel: Int { channel + 1 }
 
     // MARK: - Contextual hardware-input switch
     //
@@ -54,28 +58,25 @@ struct ChannelStrip: View {
 
     @ViewBuilder
     private func inputSwitch(source: SignalSource) -> some View {
-        switch source {
-        case .analog1:
+        // A stereo strip's switch sets both inputs of the pair (shown from
+        // the left one), so Analog 1/2 flips both to Line or Inst together.
+        let pairSources: Set<SignalSource> = isStereo
+            ? [source, state.mixerSources[rightChannel]] : [source]
+        let impedanceChannels = [(SignalSource.analog1, 1), (.analog2, 2)]
+            .filter { pairSources.contains($0.0) }.map(\.1)
+        let hiLoChannels = [(SignalSource.analog3, 3), (.analog4, 4)]
+            .filter { pairSources.contains($0.0) }.map(\.1)
+        if let first = impedanceChannels.first {
             ImpedanceSwitch(value: Binding(
-                get: { state.impedance1 },
-                set: { state.userSetImpedance(channel: 1, mode: $0) }
+                get: { first == 1 ? state.impedance1 : state.impedance2 },
+                set: { mode in impedanceChannels.forEach { state.userSetImpedance(channel: $0, mode: mode) } }
             ))
-        case .analog2:
-            ImpedanceSwitch(value: Binding(
-                get: { state.impedance2 },
-                set: { state.userSetImpedance(channel: 2, mode: $0) }
-            ))
-        case .analog3:
+        } else if let first = hiLoChannels.first {
             HiLoSwitch(value: Binding(
-                get: { state.hi3 },
-                set: { state.userSetHiLo(channel: 3, hi: $0) }
+                get: { first == 3 ? state.hi3 : state.hi4 },
+                set: { hi in hiLoChannels.forEach { state.userSetHiLo(channel: $0, hi: hi) } }
             ))
-        case .analog4:
-            HiLoSwitch(value: Binding(
-                get: { state.hi4 },
-                set: { state.userSetHiLo(channel: 4, hi: $0) }
-            ))
-        default:
+        } else {
             // Reserve the same vertical footprint so every strip aligns.
             Color.clear.frame(height: 22)
         }
@@ -87,14 +88,26 @@ struct ChannelStrip: View {
         VStack(spacing: 3) {
             nameField
             Spacer(minLength: 0)
-            ThemedMenuPicker(
-                options: state.matrixSourceOptions,
-                displayName: { $0.displayName },
-                selection: Binding(
-                    get: { state.mixerSources[channel] },
-                    set: { state.userSetMixerSource(channel: channel, source: $0) }
+            if isStereo {
+                ThemedMenuPicker(
+                    options: state.stereoSourceOptions,
+                    displayName: { $0.displayName },
+                    selection: Binding(
+                        get: { StereoSource(left: state.mixerSources[channel],
+                                            right: state.mixerSources[rightChannel]) },
+                        set: { state.userSetStereoSource(leftChannel: channel, $0) }
+                    )
                 )
-            )
+            } else {
+                ThemedMenuPicker(
+                    options: state.matrixSourceOptions,
+                    displayName: { $0.displayName },
+                    selection: Binding(
+                        get: { state.mixerSources[channel] },
+                        set: { state.userSetMixerSource(channel: channel, source: $0) }
+                    )
+                )
+            }
 
             Rectangle()
                 .fill(source.accentColor)
@@ -105,10 +118,13 @@ struct ChannelStrip: View {
         .frame(height: StripLayout.headerHeight, alignment: .bottom)
     }
 
-    /// Channel name — defaults to "Ch N", double-click to rename.
+    /// Channel name — defaults to "Ch N" ("Ch N/Ch N+1" for a stereo
+    /// strip), double-click to rename.
     private var nameField: some View {
         let stored = state.mixerNames[channel]
-        let displayed = stored.isEmpty ? "Ch \(channel + 1)" : stored
+        let displayed = isStereo
+            ? state.stereoDisplayName(leftChannel: channel)
+            : (stored.isEmpty ? "Ch \(channel + 1)" : stored)
         return Group {
             if editingName {
                 TextField("Name", text: $nameDraft)
@@ -142,7 +158,11 @@ struct ChannelStrip: View {
 
     private func commitName() {
         let trimmed = nameDraft.trimmingCharacters(in: .whitespaces)
-        state.userSetChannelName(channel: channel, name: trimmed)
+        if isStereo {
+            state.userSetStereoName(leftChannel: channel, name: trimmed)
+        } else {
+            state.userSetChannelName(channel: channel, name: trimmed)
+        }
         editingName = false
     }
 
@@ -150,51 +170,80 @@ struct ChannelStrip: View {
 
     private var fader: some View {
         let pair = MixerState.pairIndex(of: state.selectedBus)
-        let level = state.mixerLevels[channel][pair]
+        let level = faderLevel(pair: pair)
         let source = state.mixerSources[channel]
 
         return HStack(alignment: .center, spacing: 4) {
             VerticalFader(db: Binding(
                 get: { level },
-                set: { state.userSetMixerLevel(channel: channel, pair: pair, level: $0) }
+                set: { setLevel($0, pair: pair) }
             ))
             .opacity(state.mixerMutes[channel] ? 0.4 : 1.0)
             .contextMenu {
-                Button("Reset fader to 0 dB") {
-                    state.userSetMixerLevel(channel: channel, pair: pair, level: 0)
-                }
+                Button("Reset fader to 0 dB") { setLevel(0, pair: pair) }
             }
 
             // Reads peaks/peaksHeld/peaksMax internally → isolated from the
             // outer strip body so 20 Hz meter updates only re-render this
             // small view, not the whole strip (faders, pickers, buttons, …).
-            StripMeter(state: state, source: source, profile: state.profile)
+            if isStereo {
+                // L and R bars side by side, split by a thin black line.
+                HStack(spacing: 0) {
+                    StripMeter(state: state, source: source, profile: state.profile)
+                    Rectangle().fill(Color.black).frame(width: 1)
+                    StripMeter(state: state, source: state.mixerSources[rightChannel],
+                               profile: state.profile)
+                }
+            } else {
+                StripMeter(state: state, source: source, profile: state.profile)
+            }
 
             DbScale()
         }
         .frame(height: faderHeight)
     }
 
+    /// The fader's level (a stereo strip's covers both channels).
+    private func faderLevel(pair: Int) -> Double {
+        isStereo ? state.stereoLevel(leftChannel: channel, pair: pair)
+                 : state.mixerLevels[channel][pair]
+    }
+
+    private func setLevel(_ db: Double, pair: Int) {
+        if isStereo {
+            state.userSetStereoLevel(leftChannel: channel, pair: pair, level: db)
+        } else {
+            state.userSetMixerLevel(channel: channel, pair: pair, level: db)
+        }
+    }
+
+    /// Pan on a mono strip.  A stereo strip has none — the pair stays hard
+    /// L/R — so it reserves the row's space to keep strips aligned.
+    @ViewBuilder
     private var panSlider: some View {
-        let pair = MixerState.pairIndex(of: state.selectedBus)
-        let pan = state.mixerPans[channel][pair]
-        return VStack(spacing: 1) {
-            Slider(
-                value: Binding(
-                    get: { pan },
-                    set: { state.userSetMixerPan(channel: channel, pair: pair, pan: $0) }
-                ),
-                in: -1...1
-            )
-            .controlSize(.mini)
-            .contextMenu {
-                Button("Reset pan to center") {
-                    state.userSetMixerPan(channel: channel, pair: pair, pan: 0)
+        if isStereo {
+            Color.clear
+        } else {
+            let pair = MixerState.pairIndex(of: state.selectedBus)
+            let pan = state.mixerPans[channel][pair]
+            VStack(spacing: 1) {
+                Slider(
+                    value: Binding(
+                        get: { pan },
+                        set: { state.userSetMixerPan(channel: channel, pair: pair, pan: $0) }
+                    ),
+                    in: -1...1
+                )
+                .controlSize(.mini)
+                .contextMenu {
+                    Button("Reset pan to center") {
+                        state.userSetMixerPan(channel: channel, pair: pair, pan: 0)
+                    }
                 }
+                Text(panLabel(pan))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
             }
-            Text(panLabel(pan))
-                .font(.system(size: 8, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -205,15 +254,21 @@ struct ChannelStrip: View {
     }
 
     private var peakReadout: some View {
-        let source = state.mixerSources[channel]
+        let sources = isStereo
+            ? [state.mixerSources[channel], state.mixerSources[rightChannel]]
+            : [state.mixerSources[channel]]
         let pair = MixerState.pairIndex(of: state.selectedBus)
         return StripReadout(
             state: state,
-            faderDb: state.mixerLevels[channel][pair],
+            faderDb: faderLevel(pair: pair),
             faderMuted: state.mixerMutes[channel],
-            maxPeak: { StripMeter.level(from: $0.peaksMax, source: source, profile: $0.profile) },
-            resetHelp: "Click to reset this channel's max peak"
-        ) { state.clearMaxPeak(forSource: source) }
+            // A stereo strip shows the louder side's max peak.
+            maxPeak: { s in
+                sources.map { StripMeter.level(from: s.peaksMax, source: $0, profile: s.profile) }
+                    .max() ?? -.infinity
+            },
+            resetHelp: isStereo ? "Click to reset this pair's max peaks" : "Click to reset this channel's max peak"
+        ) { sources.forEach { state.clearMaxPeak(forSource: $0) } }
     }
 
     // MARK: - Mute / Solo

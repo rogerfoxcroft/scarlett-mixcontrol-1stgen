@@ -1270,11 +1270,20 @@ final class MixerState {
     }
 
     /// Linking pans the pair hard L/R on every bus; unlinking centers both
-    /// channels — same as Focusrite MixControl.
+    /// channels — same as Focusrite MixControl.  Linking also snaps the two
+    /// sources to a stereo source pair (e.g. Analog 3 → Analog 3/4), since a
+    /// linked strip only offers pairs; any other strip holding the partner
+    /// source is switched off.
     func userToggleLink(channel ch: Int) {
         let left = Self.leftOfPair(ch)
         let linking = !linkedPairs.contains(left)
         if linking {
+            let current = StereoSource(left: mixerSources[left], right: mixerSources[left + 1])
+            if !stereoSourceOptions.contains(current),
+               let seed = [current.left, current.right].first(where: { $0 != .off }),
+               let target = stereoSourcePair(containing: seed) {
+                userSetStereoSource(leftChannel: left, target)
+            }
             linkedPairs.insert(left)
         } else {
             linkedPairs.remove(left)
@@ -1329,6 +1338,82 @@ final class MixerState {
     func userSetChannelName(channel: Int, name: String) {
         guard (0..<18).contains(channel) else { return }
         mixerNames[channel] = name
+        saveMatrix()
+    }
+
+    // MARK: - Stereo (linked) strips
+    //
+    // A linked pair (even channel L + odd channel R) is shown as one strip.
+    // The device has no notion of stereo — the 1st-gen matrix is just
+    // per-cell gains — so everything here maps onto the two mono channels.
+
+    /// Source pairs offered on a linked strip: Off, then every odd/even
+    /// pair of one family the device offers (DAW 1/2, Analog 3/4, …).
+    var stereoSourceOptions: [StereoSource] {
+        let opts = matrixSourceOptions.filter { $0 != .off }
+        var out: [StereoSource] = [.off]
+        for a in opts {
+            guard let na = StereoSource.split(a), na.number % 2 == 1,
+                  let b = opts.first(where: {
+                      guard let nb = StereoSource.split($0) else { return false }
+                      return nb.prefix == na.prefix && nb.number == na.number + 1
+                  })
+            else { continue }
+            out.append(StereoSource(left: a, right: b))
+        }
+        return out
+    }
+
+    /// The offered source pair that includes `source`, if any.
+    func stereoSourcePair(containing source: SignalSource) -> StereoSource? {
+        stereoSourceOptions.first { $0 != .off && ($0.left == source || $0.right == source) }
+    }
+
+    /// Assign a source pair to a linked strip.  Any other strip holding
+    /// either source is switched off (see `userSetMixerSource`).
+    func userSetStereoSource(leftChannel l: Int, _ s: StereoSource) {
+        guard l % 2 == 0, (0..<17).contains(l) else { return }
+        userSetMixerSource(channel: l, source: s.left)
+        userSetMixerSource(channel: l + 1, source: s.right)
+    }
+
+    // A linked pair is always panned hard L/R on every bus, with one level
+    // for both channels.  There's no pan or balance on a stereo strip —
+    // placing the pair in the stereo field is left to the DAW.
+
+    /// Fader level of a linked pair (the louder side, should the two ever
+    /// differ — e.g. after linking two strips set to different levels).
+    func stereoLevel(leftChannel l: Int, pair: Int) -> Double {
+        max(mixerLevels[l][pair], mixerLevels[l + 1][pair])
+    }
+
+    /// Set both channels of a linked pair to `level`, re-asserting hard
+    /// L/R pans (older linked pairs may carry narrowed ones).
+    func userSetStereoLevel(leftChannel l: Int, pair: Int, level: Double) {
+        guard l % 2 == 0, (0..<17).contains(l), (0..<stereoPairCount).contains(pair) else { return }
+        mixerLevels[l][pair] = level
+        mixerLevels[l + 1][pair] = level
+        mixerPans[l][pair] = -1
+        mixerPans[l + 1][pair] = 1
+        pushBusPair(channel: l, pair: pair)
+        pushBusPair(channel: l + 1, pair: pair)
+        saveMatrix()
+    }
+
+    /// Header text for a linked strip: "Ch 1/Ch 2", custom names joined the
+    /// same way, or the pair's own name (stored on L, with R left blank).
+    func stereoDisplayName(leftChannel l: Int) -> String {
+        let ln = mixerNames[l], rn = mixerNames[l + 1]
+        if !ln.isEmpty && rn.isEmpty { return ln }
+        return "\(ln.isEmpty ? "Ch \(l + 1)" : ln)/\(rn.isEmpty ? "Ch \(l + 2)" : rn)"
+    }
+
+    /// Rename a linked strip: the name goes on L and R's is cleared, so the
+    /// strip shows just that name (and L keeps it if the pair is unlinked).
+    func userSetStereoName(leftChannel l: Int, name: String) {
+        guard l % 2 == 0, (0..<17).contains(l) else { return }
+        mixerNames[l] = name
+        mixerNames[l + 1] = ""
         saveMatrix()
     }
 
@@ -1927,5 +2012,33 @@ final class MixerState {
         }
         logEvent(.info, "Flash", "Settings saved to hardware")
         return true
+    }
+}
+
+/// The pair of sources feeding a linked (stereo) strip's L and R channels.
+struct StereoSource: Hashable, Identifiable, Sendable {
+    let left: SignalSource
+    let right: SignalSource
+
+    static let off = StereoSource(left: .off, right: .off)
+
+    var id: UInt16 { UInt16(left.rawValue) << 8 | UInt16(right.rawValue) }
+
+    /// "DAW 1/2" for a same-family pair, "Off", or both names in full for
+    /// anything else (e.g. a pair restored from an older preset).
+    var displayName: String {
+        if self == .off { return "Off" }
+        if let l = Self.split(left), let r = Self.split(right), l.prefix == r.prefix {
+            return "\(l.prefix) \(l.number)/\(r.number)"
+        }
+        return "\(left.displayName)/\(right.displayName)"
+    }
+
+    /// "Analog 3" → ("Analog", 3).
+    static func split(_ s: SignalSource) -> (prefix: String, number: Int)? {
+        let name = s.displayName
+        guard let space = name.lastIndex(of: " "),
+              let n = Int(name[name.index(after: space)...]) else { return nil }
+        return (String(name[..<space]), n)
     }
 }
