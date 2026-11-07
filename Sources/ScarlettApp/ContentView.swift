@@ -173,7 +173,6 @@ struct ContentView: View {
                 statusBadge
                 if state.isConnected {
                     Text("Firmware \(state.firmware)").font(.caption2).foregroundStyle(Theme.textSecondary)
-                    Text("Serial \(state.serial)").font(.caption2).foregroundStyle(Theme.textSecondary)
                 }
                 Text("App \(AppInfo.displayVersion)")
                     .font(.caption2)
