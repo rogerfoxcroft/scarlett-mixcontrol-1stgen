@@ -740,6 +740,15 @@ final class MixerState {
                     }
                 }
             }
+        } else {
+            // No saved matrix (first launch, or preferences deleted): links
+            // only ever lived in UserDefaults, so recover them from the
+            // gains just read off the device.
+            linkedPairs = inferLinkedPairs()
+            if !linkedPairs.isEmpty {
+                let names = linkedPairs.sorted().map { "Ch \($0 + 1)/\($0 + 2)" }
+                logEvent(.info, "Link", "Restored links from device: \(names.joined(separator: ", "))")
+            }
         }
 
         if let data = defaults.data(forKey: Self.presetsKey),
@@ -1346,6 +1355,32 @@ final class MixerState {
 
     /// Fixed even/odd partner index for a given channel.
     private static func leftOfPair(_ ch: Int) -> Int { ch - (ch % 2) }
+
+    /// Odd/even channel pairs that look linked in the device's matrix — the
+    /// device has no link flag, but linking (here and in the original
+    /// MixControl) pans the pair hard L/R at equal levels on every bus.  A
+    /// pair counts when, on every mix pair, both channels are silent or
+    /// they're hard L/R within 1 dB, and at least one mix pair is audible.
+    /// (The device stores whole dB, so levels a fraction of a dB apart can
+    /// read back 1 dB apart.)  Reads `mixerLevels` / `mixerPans` as derived by
+    /// `refreshFromDevice`.
+    func inferLinkedPairs() -> Set<Int> {
+        let silent = -127.0
+        var found = Set<Int>()
+        for l in stride(from: 0, to: 17, by: 2) {
+            var audible = false
+            var linked = true
+            for pair in 0..<stereoPairCount {
+                let lv = mixerLevels[l][pair], rv = mixerLevels[l + 1][pair]
+                if lv <= silent && rv <= silent { continue }
+                guard mixerPans[l][pair] <= -0.99, mixerPans[l + 1][pair] >= 0.99,
+                      abs(lv - rv) <= 1 else { linked = false; break }
+                audible = true
+            }
+            if linked && audible { found.insert(l) }
+        }
+        return found
+    }
 
     func isLinked(_ ch: Int) -> Bool {
         linkedPairs.contains(Self.leftOfPair(ch))
