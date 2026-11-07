@@ -308,7 +308,9 @@ final class MixerState {
                 let minor = (lo >> 4) * 10 + (lo & 0xf)
                 self.firmware = String(format: "v%d.%02d", major, minor)
             }
-            self.serial = dev.serialNumber() ?? "—"
+            // 1st-gen firmware has no USB serial string descriptor
+            // (iSerialNumber = 0), so there is nothing to read.
+            self.serial = dev.serialNumber() ?? "Not available on 1st gen devices"
             refreshFromDevice()
             loadPersistedState()
             restoringProfileState = false
