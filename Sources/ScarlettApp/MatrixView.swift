@@ -39,14 +39,19 @@ struct MatrixMixerView: View {
 
     private var busTabs: some View {
         HStack(spacing: 4) {
-            ForEach(state.matrixBuses) { bus in
-                let selected = state.selectedBus == bus
+            // One tab per stereo mix pair: faders and pans are stored per
+            // pair (M1 = left, M2 = right), so M1 and M2 were always the
+            // same view.
+            ForEach(state.matrixBuses.filter(\.isLeftOfPair)) { bus in
+                let pair = MixerState.pairIndex(of: bus)
+                let selected = MixerState.pairIndex(of: state.selectedBus) == pair
                 Button {
                     state.selectedBus = bus
                 } label: {
-                    Text(bus.displayName)
+                    Text(MixerState.mixPairName(pair))
                         .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 60, height: 28)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
                         .background(selected ? Theme.muteActive : Theme.panelRaised)
                         .foregroundStyle(selected ? .white : Theme.textSecondary)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -119,14 +124,13 @@ struct MatrixMixerView: View {
     }
 
     /// Context-menu items for a bus tab — copy this pair's settings to one
-    /// of the other two pairs.  Right-click any bus tab to access.
+    /// of the other pairs.  Right-click any bus tab to access.
     @ViewBuilder
     private func copyMixMenuItems(targetBus: MixBus) -> some View {
         let sourcePair = targetBus.stereoPairIndex ?? 0
-        let pairLabel: (Int) -> String = { p in "M\(p*2 + 1)+M\(p*2 + 2)" }
         ForEach(0..<state.stereoPairCount, id: \.self) { dest in
             if dest != sourcePair {
-                Button("Copy \(pairLabel(sourcePair)) → \(pairLabel(dest))") {
+                Button("Copy \(MixerState.mixPairName(sourcePair)) → \(MixerState.mixPairName(dest))") {
                     state.userCopyMixPair(from: sourcePair, to: dest)
                 }
             }

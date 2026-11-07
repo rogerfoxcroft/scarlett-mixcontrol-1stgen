@@ -1247,6 +1247,9 @@ final class MixerState {
     static func pairIndex(of bus: MixBus) -> Int { bus.stereoPairIndex ?? 0 }
     static func isLeftSide(of bus: MixBus) -> Bool { bus.isLeftOfPair }
 
+    /// "Mix M1/M2" for stereo mix pair 0, and so on.
+    static func mixPairName(_ pair: Int) -> String { "Mix M\(pair * 2 + 1)/M\(pair * 2 + 2)" }
+
     func userSetMixerSource(channel: Int, source: SignalSource) {
         guard (0..<18).contains(channel) else { return }
         // Steal the source from any other channel that holds it.  Contrary to
@@ -2056,9 +2059,7 @@ final class MixerState {
             pushBusPair(channel: ch, pair: destPair)
         }
         saveMatrix()
-        let srcName = "Mix M\(sourcePair*2 + 1)+M\(sourcePair*2 + 2)"
-        let dstName = "Mix M\(destPair*2 + 1)+M\(destPair*2 + 2)"
-        logEvent(.info, "Copy", "Copied \(srcName) → \(dstName)")
+        logEvent(.info, "Copy", "Copied \(Self.mixPairName(sourcePair)) → \(Self.mixPairName(destPair))")
     }
 
     // MARK: - Master section helpers
