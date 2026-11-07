@@ -410,7 +410,7 @@ struct LinkButton: View {
             Image(systemName: "link")
                 .font(.system(size: 10, weight: .semibold))
                 .frame(width: 22, height: 22)
-                .background(active ? Theme.muteActive : Theme.panelRaised)
+                .background(active ? Theme.accent : Theme.panelRaised)
                 .foregroundStyle(active ? .white : Theme.textSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: 3))
         }

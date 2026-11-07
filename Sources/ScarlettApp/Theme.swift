@@ -78,8 +78,12 @@ enum Theme {
     /// Channel underline for mix-bus loops and other.
     static let accentOther = Color(white: 0.40)
 
-    /// Mute button when engaged (Control 2 uses blue, not red).
-    static let muteActive = Color(red: 0.25, green: 0.50, blue: 0.95)
+    /// Accent blue: selected tabs, link / HW buttons, primary actions.
+    static let accent = Color(red: 0.25, green: 0.50, blue: 0.95)
+
+    /// Mute buttons (and muted level readouts) when engaged — red, like the
+    /// 18i20's own front-panel MUTE light.
+    static let muteActive = Color(red: 0.88, green: 0.26, blue: 0.24)
 
     /// Solo button when engaged.
     static let soloActive = Color(red: 0.95, green: 0.70, blue: 0.25)

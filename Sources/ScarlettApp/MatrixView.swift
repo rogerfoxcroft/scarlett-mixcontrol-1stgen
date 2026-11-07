@@ -52,7 +52,7 @@ struct MatrixMixerView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .padding(.horizontal, 10)
                         .frame(height: 28)
-                        .background(selected ? Theme.muteActive : Theme.panelRaised)
+                        .background(selected ? Theme.accent : Theme.panelRaised)
                         .foregroundStyle(selected ? .white : Theme.textSecondary)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }

@@ -771,7 +771,7 @@ struct ConnectionOverlayCard: View {
                         state.attemptConnect()
                     } label: {
                         Pill(icon: "arrow.clockwise", title: "Retry now",
-                             fill: Theme.muteActive, foreground: .white, size: .card)
+                             fill: Theme.accent, foreground: .white, size: .card)
                     }
                     .buttonStyle(.pill)
                 }
@@ -858,7 +858,7 @@ struct FirstLaunchCard: View {
                 Button {
                     state.userCompleteFirstLaunch(applyDefaults: true)
                 } label: {
-                    Pill(title: "Apply defaults", fill: Theme.muteActive, foreground: .white, size: .card)
+                    Pill(title: "Apply defaults", fill: Theme.accent, foreground: .white, size: .card)
                 }
                 .buttonStyle(.pill)
             }
@@ -869,7 +869,7 @@ struct FirstLaunchCard: View {
         .background(Theme.panel)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Theme.muteActive.opacity(0.45), lineWidth: 1)
+                .strokeBorder(Theme.accent.opacity(0.45), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(color: .black.opacity(0.45), radius: 24, y: 4)
