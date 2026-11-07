@@ -169,6 +169,19 @@ final class MixerState {
     /// knob + DIM/MUTE buttons).  Polled ~1 Hz while connected; read-only —
     /// the hardware owns these controls, the app just reflects them.
     var hwMonitor: HardwareMonitorState? = nil
+    /// 18i20: whether the front-panel volume knob drives the Monitor pair.
+    /// Off disconnects it (the DIM/MUTE buttons keep working) and the
+    /// Monitor fader sets the level instead.  Persisted per device and
+    /// re-applied on connect — the device forgets it on power-up.
+    var monitorKnobEnabled: Bool = true
+    /// True once the app has written the knob's output set (the user has
+    /// used the HW switch).  From then on the firmware stops applying the
+    /// knob itself — verified on an 18i20: a written set, even the Monitor
+    /// pair, leaves the knob reading but not changing the level — so while
+    /// the knob is enabled the app applies it, writing each knob movement
+    /// to the Monitor pair's gain stage.  Until then the device's power-up
+    /// knob handling stands and the app writes nothing.
+    @ObservationIgnored private var monitorKnobManaged = false
 
     // MARK: - Output pair helpers
 
@@ -470,6 +483,7 @@ final class MixerState {
     private static let menuBarOutputsKeyPrefix  = "scarlett.menuBarOutputs.v1"
     private static let loadedPresetKeyPrefix    = "scarlett.loadedPreset.v1"
     private static let outputStereoKeyPrefix    = "scarlett.outputStereo.v1"
+    private static let monitorKnobKeyPrefix     = "scarlett.monitorKnob.v1"
 
     private func routesKey(for profile: DeviceProfile) -> String {
         "\(Self.routesKeyPrefix).\(profile.productID)"
@@ -491,6 +505,9 @@ final class MixerState {
     }
     private func visibleOutputsKey(for profile: DeviceProfile) -> String {
         "\(Self.visibleOutputsKeyPrefix).\(profile.productID)"
+    }
+    private func monitorKnobKey(for profile: DeviceProfile) -> String {
+        "\(Self.monitorKnobKeyPrefix).\(profile.productID)"
     }
     private func outputStereoKey(for profile: DeviceProfile) -> String {
         "\(Self.outputStereoKeyPrefix).\(profile.productID)"
@@ -550,6 +567,8 @@ final class MixerState {
 
         monitorMono = false
         hwMonitor = nil
+        monitorKnobEnabled = true
+        monitorKnobManaged = false
         showFirstLaunchPrompt = false
         peaks = .empty
         peaksHeld = .empty
@@ -691,6 +710,15 @@ final class MixerState {
             let valid = Set(profile.physicalOutputs.map(\.pairLabel))
             let filtered = Set(saved.map { renamed[$0] ?? $0 }).intersection(valid)
             if !filtered.isEmpty { visiblePairLabels = filtered }
+        }
+
+        // Front-panel knob (18i20).  Only re-asserted once the user has
+        // chosen; until then the device's power-up behaviour stands.
+        if profile.hasHardwareMonitorControls,
+           let saved = defaults.object(forKey: monitorKnobKey(for: profile)) as? Bool {
+            monitorKnobEnabled = saved
+            monitorKnobManaged = true
+            pushMonitorKnob()
         }
 
         // Routing page Stereo ticks, minus labels this profile doesn't have.
@@ -945,6 +973,13 @@ final class MixerState {
                     hw.mute ? "Hardware Mute engaged" : "Hardware Mute released")
             }
         }
+        // The app applies the knob once it has taken it over (see
+        // `monitorKnobManaged`); the first poll after connecting syncs it.
+        if monitorKnobManaged, monitorKnobEnabled,
+           hwMonitor?.potAttenuationDb != hw.potAttenuationDb {
+            userSetPairAtten(leftWValue: monitorPairLeftWValue,
+                             db: max(DbAxis.off, hw.potAttenuationDb))
+        }
         if hwMonitor != hw { hwMonitor = hw }
     }
 
@@ -1090,6 +1125,37 @@ final class MixerState {
                 try? dev.setOutputAttenuation(outputWValue: wv, db: db)
             }
         }
+    }
+
+    // MARK: - Front-panel knob (18i20)
+
+    /// Bitmask of the outputs the knob drives when enabled: the Monitor pair.
+    private var monitorKnobMask: UInt32 {
+        pairMembers(leftWValue: monitorPairLeftWValue).reduce(0) { $0 | (1 << UInt32($1)) }
+    }
+
+    private func pushMonitorKnob() {
+        guard profile.hasHardwareMonitorControls, let dev = device else { return }
+        let mask = monitorKnobEnabled ? monitorKnobMask : 0
+        writeAsync { try? dev.setMonitorKnobOutputs(mask: mask) }
+    }
+
+    /// Connect or disconnect the front-panel knob, as MixControl's hardware
+    /// control switch did.  Either way the Monitor level starts from the
+    /// knob's current position, so nothing jumps: disconnected, the fader
+    /// takes over from there; connected, the app follows the knob (see
+    /// `monitorKnobManaged`).
+    func userSetMonitorKnobEnabled(_ enabled: Bool) {
+        guard profile.hasHardwareMonitorControls else { return }
+        monitorKnobEnabled = enabled
+        monitorKnobManaged = true
+        if let hw = hwMonitor {
+            userSetPairAtten(leftWValue: monitorPairLeftWValue,
+                             db: max(DbAxis.off, hw.potAttenuationDb))
+        }
+        pushMonitorKnob()
+        UserDefaults.standard.set(enabled, forKey: monitorKnobKey(for: profile))
+        logEvent(.info, "Monitor", enabled ? "Front-panel knob connected" : "Front-panel knob disconnected")
     }
 
     /// Mute/unmute one physical output (one side of a pair).

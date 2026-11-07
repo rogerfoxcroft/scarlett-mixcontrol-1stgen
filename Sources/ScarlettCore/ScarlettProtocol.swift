@@ -674,6 +674,29 @@ extension ScarlettDevice {
         )
     }
 
+    /// Choose which analog outputs' volume follows the 18i20's front-panel
+    /// knob: bit n set = output n+1 (wValue n) follows it.  An empty mask
+    /// disconnects the knob, leaving those outputs at their software gain
+    /// stage; the DIM/MUTE buttons are a separate set and keep working.
+    ///
+    /// Reverse-engineered from MixControl 1.10.6 `MacHWDevice::
+    /// setMonitorGainSet`: bRequest=CS_MEM (0x03), wValue=0x000a,
+    /// wIndex=0x3c00, 4 bytes little-endian.  MixControl's "hardware
+    /// control" switch (`FFMonitor::setHWControl`) writes 0 to turn the
+    /// knob off and the monitored-output mask to turn it back on.
+    /// (wValue 0x000b is the matching DIM/MUTE set, `setMonitorSwitchSet`.)
+    public func setMonitorKnobOutputs(mask: UInt32) throws {
+        try controlOut(cmd: 0x03, value: 0x000a, index: 0x3c00,
+                       data: withUnsafeBytes(of: mask.littleEndian, Array.init))
+    }
+
+    /// Read back the knob's output mask.  MixControl never did this — it
+    /// kept the set in its own settings — so treat the result as a probe.
+    public func getMonitorKnobOutputs() throws -> UInt32 {
+        let r = try controlIn(cmd: 0x03, value: 0x000a, index: 0x3c00, length: 4)
+        return r.reversed().reduce(0) { $0 << 8 | UInt32($1) }
+    }
+
     // ---- Save -------------------------------------------------------------
 
     /// Persist current mixer/routing state to the device's flash so it
