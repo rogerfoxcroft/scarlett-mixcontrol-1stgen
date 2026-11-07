@@ -388,14 +388,12 @@ struct RoutingView: View {
                 Panel(title: "Output assignments") {
                     VStack(spacing: 8) {
                         ForEach(state.physicalOutputGroups, id: \.label) { group in
-                            let left = group.outputs.first(where: { $0.isLeft })
-                            let right = group.outputs.first(where: { !$0.isLeft })
-                            if let left, let right {
-                                stereoRouteRow(
+                            if let w = state.outputPairWValues(group.label) {
+                                outputRouteRow(
                                     group.label,
                                     group.outputs.map(\.displayName).joined(separator: " + "),
-                                    left.wValue,
-                                    right.wValue
+                                    w.left,
+                                    w.right
                                 )
                             }
                         }
@@ -427,16 +425,47 @@ struct RoutingView: View {
 
 extension RoutingView {
 
-    fileprivate func stereoRouteRow(_ title: String, _ subtitle: String, _ leftW: UInt16, _ rightW: UInt16) -> some View {
-        HStack(alignment: .center, spacing: 14) {
+    /// One output pair.  With Stereo ticked it takes a single source pair
+    /// (Mix M1/M2, DAW 1/2, …); unticked, each output picks its own source
+    /// (each labelled with its physical output, "Out 5" / "Out 6").
+    fileprivate func outputRouteRow(_ title: String, _ subtitle: String, _ leftW: UInt16, _ rightW: UInt16) -> some View {
+        let stereo = state.isOutputPairStereo(title)
+        return HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.bold()).foregroundStyle(Theme.textPrimary)
                 Text(subtitle).font(.caption).foregroundStyle(Theme.textSecondary)
             }
             .frame(width: 220, alignment: .leading)
 
-            routePicker(label: "L", wValue: leftW)
-            routePicker(label: "R", wValue: rightW)
+            Toggle("Stereo", isOn: Binding(
+                get: { stereo },
+                set: { state.userSetOutputPairStereo(title, $0) }
+            ))
+            .toggleStyle(.checkbox)
+            .font(.caption)
+            .foregroundStyle(Theme.textSecondary)
+            .help("Route a stereo source pair to both outputs, or untick to pick each output's source separately")
+
+            if stereo {
+                HStack(spacing: 6) {
+                    // Same leading slot as the output labels, so the
+                    // picker doesn't jump when Stereo is toggled.
+                    Color.clear.frame(width: Self.outputLabelWidth, height: 1)
+                    ThemedMenuPicker(
+                        options: state.stereoRouteOptions,
+                        displayName: { $0.displayName },
+                        selection: Binding(
+                            get: { state.routePair(forOutputPair: title) },
+                            set: { state.userSetStereoRoute(outputPair: title, $0) }
+                        ),
+                        width: 150
+                    )
+                }
+                .fixedSize()
+            } else {
+                routePicker(label: "Out \(leftW + 1)", wValue: leftW)
+                routePicker(label: "Out \(rightW + 1)", wValue: rightW)
+            }
             Spacer(minLength: 0)
         }
         .padding(10)
@@ -444,9 +473,13 @@ extension RoutingView {
         .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
+    /// Fits "Out 10" (the 18i20 has 10 analog outputs plus digital ones).
+    fileprivate static let outputLabelWidth: CGFloat = 42
+
     fileprivate func routePicker(label: String, wValue: UInt16) -> some View {
         HStack(spacing: 6) {
-            Text(label).font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary).frame(width: 12)
+            Text(label).font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                .frame(width: Self.outputLabelWidth, alignment: .leading)
             ThemedMenuPicker(
                 options: state.routerPickerOptions,
                 displayName: { $0.displayName },
@@ -457,6 +490,8 @@ extension RoutingView {
                 width: 150
             )
         }
+        // A fixed-width menu otherwise stretches to fill the row.
+        .fixedSize()
     }
 
     fileprivate func stereoCaptureRow(_ title: String, _ subtitle: String, _ leftCh: Int, _ rightCh: Int) -> some View {
