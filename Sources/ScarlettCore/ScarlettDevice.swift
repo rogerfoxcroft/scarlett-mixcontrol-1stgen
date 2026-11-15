@@ -36,6 +36,8 @@ private let UUID_IOUSBDeviceInterfaceID100 = makeUUID(
 
 public enum ScarlettError: Error, CustomStringConvertible {
     case deviceNotFound(vid: UInt16, pid: UInt16)
+    /// A recognised 1st-gen Scarlett with no software mixer (e.g. 2i4).
+    case noSoftwareMixer(modelName: String, pid: UInt16)
     case ioReturn(String, IOReturn)
     case queryInterface(HRESULT)
     case invalidArgument(String)
@@ -44,6 +46,8 @@ public enum ScarlettError: Error, CustomStringConvertible {
         switch self {
         case .deviceNotFound(let v, let p):
             return String(format: "Scarlett not found (VID 0x%04x / PID 0x%04x).", v, p)
+        case .noSoftwareMixer(let name, let p):
+            return String(format: "%@ (1st Gen, PID 0x%04x) has no software mixer — it is controlled from its front panel.", name, p)
         case .ioReturn(let op, let r):
             return String(format: "%@ failed: 0x%08x (%d)", op, UInt32(bitPattern: r), r)
         case .queryInterface(let h):
@@ -104,6 +108,22 @@ public final class ScarlettDevice {
             }
         }
         guard let picked else {
+            // Nothing drivable — but if a mixer-less 1st-gen model is on
+            // the bus, say so rather than reporting "not found".
+            for model in DeviceProfile.mixerlessModels {
+                let match = IOServiceMatching(kIOUSBDeviceClassName) as NSMutableDictionary
+                match[kUSBVendorID]  = NSNumber(value: Self.focusriteVID)
+                match[kUSBProductID] = NSNumber(value: model.productID)
+                var iter: io_iterator_t = 0
+                guard IOServiceGetMatchingServices(kIOMainPortDefault, match, &iter) == KERN_SUCCESS
+                else { continue }
+                let svc = IOIteratorNext(iter)
+                IOObjectRelease(iter)
+                if svc != 0 {
+                    IOObjectRelease(svc)
+                    throw ScarlettError.noSoftwareMixer(modelName: model.modelName, pid: model.productID)
+                }
+            }
             throw ScarlettError.deviceNotFound(vid: Self.focusriteVID, pid: 0)
         }
         self.service = picked.svc

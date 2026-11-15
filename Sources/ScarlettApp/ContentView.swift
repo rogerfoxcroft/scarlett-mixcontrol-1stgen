@@ -227,6 +227,7 @@ struct ContentView: View {
         case .waiting:      return "antenna.radiowaves.left.and.right.slash"
         case .disconnected: return "xmark.circle.fill"
         case .unsupported:  return "exclamationmark.triangle.fill"
+        case .noSoftwareMixer: return "info.circle.fill"
         }
     }
     private var connectionColor: Color {
@@ -235,6 +236,7 @@ struct ContentView: View {
         case .waiting:      return .orange
         case .disconnected: return .red
         case .unsupported:  return .yellow
+        case .noSoftwareMixer: return .secondary
         }
     }
     private var connectionHelp: String {
@@ -243,6 +245,7 @@ struct ContentView: View {
         case .waiting:             return "Waiting for device"
         case .disconnected(let r): return "Disconnected — \(r)"
         case .unsupported(let p):  return "\(p.displayName) — unsupported"
+        case .noSoftwareMixer(let n): return "\(n) (1st Gen) — no software mixer"
         }
     }
 
@@ -294,6 +297,7 @@ struct ContentView: View {
         case .waiting:      return "Waiting for device"
         case .disconnected: return "Disconnected"
         case .unsupported:  return "Unsupported device"
+        case .noSoftwareMixer: return "No software mixer"
         }
     }
 
@@ -765,7 +769,7 @@ struct ConnectionOverlayCard: View {
             // Retry button only makes sense for waiting/disconnected.  For
             // "unsupported device" hammering Retry can't change the model
             // on the bus, so hide it.
-            if case .unsupported = state.connection { EmptyView() } else {
+            if state.connection.isTerminalForThisDevice { EmptyView() } else {
                 HStack(spacing: 10) {
                     Button {
                         state.attemptConnect()
@@ -813,6 +817,13 @@ struct ConnectionOverlayCard: View {
                 "exclamationmark.triangle.fill",
                 "\(p.displayName) detected — not yet supported",
                 "This build drives the five shipping 1st-gen USB Scarletts (8i6, 6i6, 18i6, 18i8, 18i20). We've detected your \(p.displayName) on the bus but don't have a byte table for it yet.\n\nIf you'd like to help add it, the project is open source and the byte tables can be extracted from the original MixControl binary — see the README."
+            )
+        case .noSoftwareMixer(let name):
+            return (
+                .secondary,
+                "info.circle.fill",
+                "\(name) (1st Gen) detected",
+                "This model has no software mixer — there is no routing or matrix to control over USB, and Focusrite's MixControl never supported it either. It works as a standard audio interface; monitoring is set with its front-panel Direct Monitor switch and knobs.\n\nPlug in an 8i6, 6i6, 18i6, 18i8 or 18i20 to use the mixer."
             )
         }
     }

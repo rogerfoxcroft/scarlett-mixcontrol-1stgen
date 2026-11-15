@@ -145,6 +145,24 @@ extension DeviceProfile {
     /// True when this build will open the device and run the full UI flow.
     public var isSupported: Bool { Self.supported.contains { $0.productID == productID } }
 
+    /// 1st-gen Scarletts that are recognised but have nothing for this app
+    /// to drive: no DSP matrix mixer, no routing table, no USB-reachable
+    /// output gain.  MixControl never supported them either; monitoring is
+    /// purely front-panel (Direct Monitor switch / input-playback knob).
+    /// Detecting them lets the UI explain that instead of sitting at
+    /// "Waiting for Scarlett" forever.
+    ///
+    /// PIDs here are ones read off real hardware — add more (e.g. the
+    /// 1st-gen 2i2) only once an owner has confirmed the ID.
+    public static let mixerlessModels: [(productID: UInt16, modelName: String)] = [
+        (0x8200, "Scarlett 2i4"),   // confirmed on hardware (ioreg idProduct 33280)
+    ]
+
+    /// Model name for a recognised mixer-less 1st-gen Scarlett PID.
+    public static func mixerlessModelName(forProductID pid: UInt16) -> String? {
+        mixerlessModels.first(where: { $0.productID == pid })?.modelName
+    }
+
     /// Look up a profile by PID.  Returns nil for unknown devices.
     public static func forProductID(_ pid: UInt16) -> DeviceProfile? {
         all.first(where: { $0.productID == pid })

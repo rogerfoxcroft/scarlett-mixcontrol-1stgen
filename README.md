@@ -118,6 +118,7 @@ For dev iteration without packaging: `swift run scarlett-app`. There's also a `s
 | Scarlett 18i6 _(1st gen)_    | 🟢 &nbsp; Beta — driven; awaiting hardware confirmation |
 | **Scarlett 18i8** _(1st gen)_ | ✅ &nbsp; Confirmed on hardware (thanks @Nas3nmann)   |
 | **Scarlett 18i20** _(1st gen)_ | ✅ &nbsp; Confirmed on hardware — routing, matrix, meters, output stages, hardware monitor section |
+| Scarlett 2i4 _(1st gen)_     | ℹ️ &nbsp; No software mixer — detected and reported; controlled from its front panel |
 | Scarlett 16i8 _(1st gen)_    | ⚪ &nbsp; Prototype SKU — no shipping USB ID to detect |
 | Scarlett 2nd / 3rd / 4th gen | ❌ &nbsp; Different protocol — won't work            |
 | Saffire (FireWire) family    | ❌ &nbsp; Different transport — won't work           |
