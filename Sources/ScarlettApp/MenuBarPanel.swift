@@ -120,12 +120,14 @@ struct MenuBarPanel: View {
         case .waiting:      return .orange
         case .disconnected: return Theme.failure
         case .unsupported:  return .yellow
+        case .noSoftwareMixer: return .secondary
         }
     }
 
     private var disconnectedText: String {
         switch state.connection {
         case .unsupported(let p): return "\(p.displayName) isn't supported."
+        case .noSoftwareMixer(let n): return "\(n) (1st Gen) has no software mixer — use its front-panel controls."
         default:                  return "Waiting for a Scarlett to be connected…"
         }
     }

@@ -13,6 +13,18 @@ public enum ConnectionState: Equatable {
     case connected                        // Device handle opened and last poll succeeded
     case disconnected(String)             // Was connected, lost — reason for display
     case unsupported(DeviceProfile)       // Found a Focusrite this build can't drive yet
+    case noSoftwareMixer(String)          // Found a mixer-less 1st-gen model (e.g. 2i4) — model name
+}
+
+extension ConnectionState {
+    /// The device on the bus is one this build won't drive, so retrying
+    /// can't help until it's swapped for another.
+    var isTerminalForThisDevice: Bool {
+        switch self {
+        case .unsupported, .noSoftwareMixer: return true
+        default:                             return false
+        }
+    }
 }
 
 // View model holding the live device handle, the latest peak meter reading,
@@ -333,6 +345,16 @@ final class MixerState {
                          "Connected to \(dev.profile.displayName) (firmware \(firmware), serial \(serial))")
             }
             connection = .connected
+        } catch ScarlettError.noSoftwareMixer(let name, _) {
+            restoringProfileState = false
+            self.device = nil
+            peaks = .empty
+            peaksHeld = .empty
+            if connection != .noSoftwareMixer(name) {
+                logEvent(.info, "Connection",
+                         "Detected \(name) (1st Gen) — no software mixer; controlled from its front panel")
+            }
+            connection = .noSoftwareMixer(name)
         } catch ScarlettError.deviceNotFound {
             restoringProfileState = false
             self.device = nil

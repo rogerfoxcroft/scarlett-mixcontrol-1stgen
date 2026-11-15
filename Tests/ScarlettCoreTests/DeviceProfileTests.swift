@@ -19,6 +19,16 @@ final class DeviceProfileTests: XCTestCase {
         }
     }
 
+    func testMixerlessModelsDoNotOverlapDrivableProfiles() {
+        let pids = DeviceProfile.mixerlessModels.map(\.productID)
+        XCTAssertEqual(Set(pids).count, pids.count)
+        for pid in pids {
+            XCTAssertNil(DeviceProfile.forProductID(pid))
+        }
+        XCTAssertEqual(DeviceProfile.mixerlessModelName(forProductID: 0x8200), "Scarlett 2i4")
+        XCTAssertNil(DeviceProfile.mixerlessModelName(forProductID: 0x800c))
+    }
+
     func testEveryAdvertisedSourceRoundTripsThroughCanonicalValue() {
         for profile in DeviceProfile.all {
             for descriptor in profile.sources {
